@@ -22,6 +22,18 @@ router.get('/messages/:id', authController.messages);
 router.post('/sendMessage/:id', authController.sendMessage);
 router.post('/markMessagesAsSeen/:id', authController.markMessagesAsSeen);
 router.get('/getUserDetails', authController.getUserDetails);
+router.post('/postJob',authController.postJob);
+router.get('/getJobPostings',authController.getJobPostings);
+router.delete('/deleteJobPosting/:id', authController.deleteJobPosting);
+router.get('/getAllJobPostings',authController.getAllJobPostings);
+router.post('/applyForJob/:id', authController.applyForJob);
+router.get('/isApplicantAvailable',authController.isApplicantAvailable);
+router.get('/getAllApplicantList',authController.getAllApplicantList);
+router.post('/approveAppliant/:id', authController.approveAppliant);
+router.post('/rejectAppliant/:id', authController.approveAppliant);
+router.post('/reliveAppliant/:id', authController.reliveAppliant);
+router.get('/getWorkHistory/:id',authController.getWorkHistory);
+
 
 
  //Get the logged-in user's profile

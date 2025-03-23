@@ -4,6 +4,9 @@ const Farmreg = require('../models/Farmreg');
 const Workerreg = require('../models/Workerreg');
 const Transaction = require("../models/Transaction");
 const ChatBase = require('../models/ChatBase');
+const JobPosting = require('../models/JobPosting')
+const JobApplication = require('../models/JobApplication')
+
 let currentToken = null;
 // Farmer Signup logic
 exports.signup = async (req, res) => {
@@ -419,5 +422,402 @@ exports.getUserDetails = async (req, res) => {
   } catch (error) {
     console.error("Error fetching admin users:", error);
     res.status(500).json({ message: "Server error. Please try again later." });
+  }
+};
+
+exports.postJob = async (req, res) => {
+  try {
+    const token = currentToken;
+    const decoded = jwt.decode(token);
+    console.log(decoded);
+    
+    const { jobTitle, jobType, amount, date, description } = req.body;
+
+    if (!jobTitle || !jobType || !amount || !date || !description) {
+      return res.status(400).json({ message: "All fields are required." });
+    }
+
+    const newJobPosting = new JobPosting({ jobTitle, jobType, amount, date, description, CreatedBy: decoded.id, });
+    await newJobPosting.save();
+
+    res.status(201).json({ message: "Job Posted successfully!" });
+  } catch (error) {
+    console.error("Error adding Jobs:", error);
+    res.status(500).json({ message: "Server error. Please try again later." });
+  }
+}
+
+exports.getJobPostings = async (req, res) => {
+  try {
+    const token = currentToken;
+
+    if (!token) {
+      return res.status(401).json({ message: "Token is missing." });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const id = decoded.id;
+
+    if (!id) {
+      return res.status(401).json({ message: "Invalid token. User ID not found." });
+    }
+
+    const jobPostings = await JobPosting.where("CreatedBy")
+      .equals(id)
+      .where("RecordStatus")
+      .ne(80);
+    if (jobPostings.length === 0) {
+      return res.status(404).json({ message: "No posts found for this user." });
+    }
+
+    res.status(200).json(jobPostings);
+  } catch (error) {
+    console.error("Error fetching jobs:", error);
+    res.status(500).json({ message: "Server error. Please try again later." });
+  }
+};
+
+exports.deleteJobPosting = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await JobPosting.findByIdAndDelete(id);
+
+    if (!result) {
+      return res.status(404).json({ message: "Job posting not found" });
+    }
+
+    res.status(200).json({ message: "Job posting deleted successfully" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error deleting Job posting" });
+  }
+};
+
+exports.getAllJobPostings = async (req, res) => {
+  try {
+    const token = currentToken;
+
+    if (!token) {
+      return res.status(401).json({ message: "Token is missing." });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const id = decoded.id;
+
+    if (!id) {
+      return res.status(401).json({ message: "Invalid token. User ID not found." });
+    }
+
+    // Fetch all job postings not created by the user
+    const jobPostings = await JobPosting.find({ CreatedBy: { $ne: id } });
+
+    if (jobPostings.length === 0) {
+      return res.status(404).json({ message: "No posts found for this user." });
+    }
+
+    // Fetch job applications for these job postings
+    const jobIds = jobPostings.map(job => job._id);
+    const appliedPostings = await JobApplication.find({ JobID: { $in: jobIds } });
+    const approvedJob = await JobApplication.where("JobID")
+      .equals(jobIds)
+      .where("Status")
+      .equals(1);
+      console.log("approvedJob",approvedJob);
+    var countstatus = approvedJob.length > 0 ? 1 : 0;
+    console.log("countstatus",countstatus);
+    // Map job postings with application status
+    const postingsWithStatus = jobPostings.map(job => {
+      const application = appliedPostings.find(app => app.JobID.toString() === job._id.toString());
+      return {
+        ...job._doc,
+        applicationStatus: application ? application.Status : null,// Default to null if no application exists
+        countStatus: countstatus
+      };
+    });
+    res.status(200).json(postingsWithStatus);
+  } catch (error) {
+    console.error("Error fetching jobs:", error);
+    res.status(500).json({ message: "Server error. Please try again later." });
+  }
+};
+
+
+exports.applyForJob = async (req, res) => {
+  try {
+    const jobId = req.params.id;
+    const token = currentToken;
+
+    if (!token) {
+      return res.status(401).json({ message: "Token is missing." });
+    }
+
+    const decoded = jwt.decode(token);
+    const userid = decoded.id;
+    const newJobApplication = new JobApplication({
+      JobID: jobId,      // Assign 'id' to 'JobID'
+      UserID: userid, // Assign 'userid' to 'UserID'
+      Status: 0,      // Default status (Applied)
+      CreatedBy: userid, // Assign 'userid' to 'CreatedBy'
+    });
+
+    await newJobApplication.save();
+
+    res.status(201).json({ message: "Job Posted successfully!" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error applying for job" });
+  }
+};
+
+exports.isApplicantAvailable = async (req, res) => {
+  try {
+    const token = currentToken;
+
+    if (!token) {
+      return res.status(401).json({ message: "Token is missing." });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const id = decoded.id;
+
+    if (!id) {
+      return res.status(401).json({ message: "Invalid token. User ID not found." });
+    }
+
+    // Fetch all job postings not created by the user
+    const jobPostings = await JobPosting.find({ CreatedBy: { $in: id } });
+
+    if (jobPostings.length === 0) {
+      return res.status(404).json({ message: "No posts found for this user." });
+    }
+
+    // Fetch job applications for these job postings
+    const jobIds = jobPostings.map(job => job._id);
+    const appliedPostings = await JobApplication.find({ JobID: { $in: jobIds } });
+
+    // Map job postings with application status
+    const postingsWithStatus = jobPostings.map(job => {
+      const application = appliedPostings.find(app => app.JobID.toString() === job._id.toString());
+      return {
+        ...job._doc,
+        applicationStatus: application ? application.Status : null // Default to null if no application exists
+      };
+    });
+    res.status(200).json(postingsWithStatus);
+  } catch (error) {
+    console.error("Error fetching jobs:", error);
+    res.status(500).json({ message: "Server error. Please try again later." });
+  }
+};
+
+
+exports.getAllApplicantList = async (req, res) => {
+  try {
+    const token = currentToken;
+    if (!token) {
+      return res.status(401).json({ message: "Token is missing." });
+    }
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const id = decoded.id;
+
+    if (!id) {
+      return res.status(401).json({ message: "Invalid token. User ID not found." });
+    }
+
+    // Fetch all job postings created by the user
+    const jobPostings = await JobPosting.find({ CreatedBy: id });
+    if (!jobPostings.length) {
+      return res.status(200).json([]);
+    }
+
+    // Get job IDs
+    const jobIds = jobPostings.map(job => job._id);
+
+    // Fetch applications for those jobs
+    const listOfApplicants = await JobApplication.find({
+      JobID: { $in: jobIds },
+      Status: { $ne: 3 } // Exclude status 3
+    });
+
+
+    if (!listOfApplicants.length) {
+      return res.status(200).json([]);
+    }
+
+    // Get unique applicant IDs
+    const applicantIds = [...new Set(listOfApplicants.map(app => app.UserID))];
+
+    // Fetch applicant details
+    const applicantDetails = await Farmreg.find({ _id: { $in: applicantIds } })
+      .select("name email phoneNo");
+
+    // Convert applicant details to a map for quick lookup
+    const applicantMap = applicantDetails.reduce((acc, user) => {
+      acc[user._id] = user;
+      return acc;
+    }, {});
+
+    // Merge data into the required format
+    const responseData = listOfApplicants.map((application, index) => {
+      const applicant = applicantMap[application.UserID] || {};
+      const job = jobPostings.find(j => j._id.toString() === application.JobID.toString());
+
+
+      return {
+        slNo: index + 1,
+        jobID: job?._id || "Unknown",
+        jobTitle: job?.jobTitle || "Unknown",
+        jobType: job?.jobType || "Unknown",
+        applicantName: applicant.name || "N/A",
+        contactNumber: applicant.phoneNo || "N/A",
+        applicantEmail: applicant.email || "N/A",
+        applicantID: applicant._id,
+        status: application.Status ?? 0,
+      };
+    });
+    res.status(200).json(responseData);
+  } catch (error) {
+    console.error("Error fetching applicants:", error);
+    res.status(500).json({ message: "Server error. Please try again later." });
+  }
+};
+
+exports.approveAppliant = async (req, res) => {
+  try {
+    const id = req.params.id;
+    const token = currentToken;
+
+    if (!token) {
+      return res.status(401).json({ message: "Token is missing." });
+    }
+
+    const decoded = jwt.decode(token);
+    const userid = decoded.id;
+    await JobApplication.updateOne(
+      { JobID: id },  // Find a single application with this JobID
+      { $set: { Status: 1 } }
+    );
+
+    await JobPosting.updateOne(
+      { _id: id },
+      { $set: { RecordStatus: 80 } }
+    );
+
+    res.status(201).json({ message: "applicant approved successfully!" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error approving  applicant" });
+  }
+};
+
+exports.rejectAppliant = async (req, res) => {
+  try {
+    const id = req.params.id;
+    const token = currentToken;
+
+    if (!token) {
+      return res.status(401).json({ message: "Token is missing." });
+    }
+
+    const decoded = jwt.decode(token);
+    const userid = decoded.id;
+    await JobApplication.updateOne(
+      { JobID: id },  // Find a single application with this JobID
+      { $set: { Status: 2 } }
+    );
+
+
+    res.status(201).json({ message: "Applicant rejected successfully!" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error rejecting applicant" });
+  }
+};
+
+exports.reliveAppliant = async (req, res) => {
+  try {
+    const id = req.params.id;
+    const token = currentToken;
+
+    if (!token) {
+      return res.status(401).json({ message: "Token is missing." });
+    }
+
+    const decoded = jwt.decode(token);
+    const userid = decoded.id;
+    await JobApplication.updateOne(
+      { JobID: id },  // Find a single application with this JobID
+      { $set: { Status: 3 } }
+    );
+    await JobPosting.updateOne(
+      { _id: id },
+      { $set: { RecordStatus: 0 } }
+    );
+
+    res.status(201).json({ message: "Applicant releived successfully!" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Error releiving applicant" });
+  }
+};
+
+exports.getWorkHistory = async (req, res) => {
+  try {
+    const id = req.params.id;
+    console.log("Received User ID: ", id);
+
+    const token = currentToken;
+    const decoded = jwt.decode(token);
+
+    // Fetch job applications with JobPosting and Farmreg details
+    const applicantHistory = await JobApplication.find({
+      UserID: id,
+      Status: 3, // Completed applications
+    })
+      .populate({
+        path: "JobID",
+        model: JobPosting,
+        select: "jobTitle jobType amount description CreatedBy",
+      })
+      .lean();
+
+    console.log("Raw applicantHistory: ", applicantHistory);
+
+    const formattedHistory = await Promise.all(
+      applicantHistory.map(async (app) => {
+        let farmDetails = { name: "Unknown", email: "Unknown", phoneNo: "Unknown" };
+        
+        if (app.JobID?.CreatedBy) {
+          const farm = await Farmreg.findById(app.JobID.CreatedBy).select("name email phoneNo").lean();
+          if (farm) {
+            farmDetails = farm;
+          }
+        }
+
+        return {
+          _id: app._id,
+          UserID: app.UserID,
+          JobID: app.JobID?._id || null,
+          Status: app.Status,
+          DocumentURL: app.DocumentURL || "N/A",
+          jobTitle: app.JobID?.jobTitle || "Unknown",
+          jobType: app.JobID?.jobType || "Unknown",
+          amount: app.JobID?.amount || 0,
+          description: app.JobID?.description || "No description",
+          jobCreatedBy: app.JobID?.CreatedBy || null,
+          farmName: farmDetails.name,
+          farmEmail: farmDetails.email,
+          farmPhone: farmDetails.phoneNo,
+        };
+      })
+    );
+
+    console.log("Formatted applicant history: ", formattedHistory);
+    res.status(200).json(formattedHistory);
+  } catch (error) {
+    console.error("Error fetching work history:", error);
+    res.status(500).json({ message: "Error retrieving applicant history." });
   }
 };
